@@ -65,7 +65,7 @@ except Exception:  # pragma: no cover
     from catalog import MEDICINES, MODE_LABELS, treatment_plan  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Medical"
-PLUGIN_VERSION = "1.3.0"
+PLUGIN_VERSION = "1.3.1"
 DISPLAY_NAME = "我想永远陪着你-医疗"
 
 try:
@@ -94,6 +94,29 @@ class AmoMedicalPlugin(Star):
         super().__init__(context)
         self.context = context
         self.config = config or {}
+
+        # 配置自愈：升级/重装/改目录名之后，把空掉的 key 从快照补回来。
+        # 快照在 plugin_data/<插件名>/config_snapshot.json（0600），升级不覆盖、
+        # schema 重写也删不到它。
+        try:
+            from .config_guard import heal as _cfg_heal, fallback_data_dir as _cfg_data_dir
+        except ImportError:
+            try:
+                from config_guard import heal as _cfg_heal, fallback_data_dir as _cfg_data_dir
+            except Exception:
+                _cfg_heal = None
+        if _cfg_heal is not None:
+            try:
+                _guard_dir = os.path.dirname(os.path.abspath(__file__))
+                _healed = _cfg_heal(self.config, plugin_name=PLUGIN_NAME,
+                                    plugin_dir=_guard_dir,
+                                    data_dir=_cfg_data_dir(_guard_dir, PLUGIN_NAME),
+                                    logger=logger)
+                if _healed.get("restored"):
+                    logger.info("[config] 本次启动补回 %d 项配置（%s）"
+                                % (len(_healed["restored"]), ", ".join(_healed["restored"])))
+            except Exception as exc:
+                logger.debug("[config] 配置自愈失败: %s" % exc)
         self._started_at = _now()
         self._health = HealthState()
         self._history: list[dict[str, Any]] = []
