@@ -176,3 +176,170 @@ def will_tough_it_out(illness: Illness, balance: float, self_pay: float,
     if balance >= self_pay:
         return rng.random() < 0.55
     return True                              # 付不起，只能扛
+
+
+# ---------------------------------------------------------------------------
+# 药品与治疗方案
+# ---------------------------------------------------------------------------
+#
+# 以前只有一个「买药 60」的口子，她当然说不出自己吃了什么。现在药品是**有名字、
+# 有单价、对症**的：感冒灵治感冒，蒙脱石散治拉肚子，阑尾炎要手术。钱仍然是
+# 病种总额说了算——药品、挂号、检查按固定单价拆开，差额进「检查/处置费」，
+# 所以**总额和医保报销口径和以前完全一致**，只是终于能说清楚钱花在哪。
+
+
+@dataclass(frozen=True, slots=True)
+class Medicine:
+    """一种药。price 是常见规格的价格（元）。"""
+
+    key: str
+    name: str
+    price: float
+    note: str = ""
+    #: oral 口服 / topical 外用 / infusion 输液
+    kind: str = "oral"
+
+
+#: 药品定价（元/盒或一次量）。改这里就是改全部药费。
+MEDICINES: dict[str, Medicine] = {
+    "ganmaoling": Medicine("ganmaoling", "感冒灵颗粒", 25.0, "一盒九袋，冲水喝", "oral"),
+    "tuire": Medicine("tuire", "布洛芬缓释胶囊", 17.0, "退烧止痛，饭后吃", "oral"),
+    "tuiretie": Medicine("tuiretie", "退热贴", 12.5, "贴额头，物理降温", "topical"),
+    "mengtuo": Medicine("mengtuo", "蒙脱石散", 22.0, "拉肚子用，一次一袋", "oral"),
+    "zuoyang": Medicine("zuoyang", "左氧氟沙星片", 25.0, "消炎，饭后", "oral"),
+    "jianwei": Medicine("jianwei", "健胃消食片", 10.0, "吃撑了或者没胃口", "oral"),
+    "toubao": Medicine("toubao", "头孢克肟胶囊", 32.0, "术后消炎", "oral"),
+    "yunnan": Medicine("yunnan", "云南白药气雾剂", 35.5, "跌打损伤外用", "topical"),
+    "putao": Medicine("putao", "葡萄糖注射液", 45.0, "挂水补液", "infusion"),
+    "koufu": Medicine("koufu", "口服补液盐", 6.0, "腹泻脱水时补电解质", "oral"),
+}
+
+#: 每种病怎么治：mode 决定挂号/住院，medicines 是吃什么药。
+TREATMENTS: dict[str, dict[str, Any]] = {
+    "light_discomfort": {
+        "mode": "self_care", "medicines": ("jianwei",),
+        "advice": "先吃点消食片，早点睡，别硬撑",
+    },
+    "cold": {
+        "mode": "self_care", "medicines": ("ganmaoling", "tuiretie"),
+        "advice": "感冒灵按时喝，多喝热水，别再吹空调了",
+    },
+    "fever": {
+        "mode": "outpatient", "medicines": ("tuire", "ganmaoling"),
+        "advice": "先去门诊看看，退烧药饭后吃，温度没下来再复诊",
+    },
+    "gastro": {
+        "mode": "outpatient", "medicines": ("mengtuo", "zuoyang", "koufu"),
+        "advice": "蒙脱石散先止住，消炎药饭后，这两天只吃清淡的",
+    },
+    "appendix": {
+        "mode": "surgery", "medicines": ("toubao", "putao"),
+        "advice": "阑尾炎拖不得，得做手术，术后挂水消炎",
+    },
+    "fracture": {
+        "mode": "inpatient", "medicines": ("yunnan", "tuire"),
+        "advice": "先固定，住院观察几天，疼得厉害吃布洛芬",
+    },
+    "exhaustion": {
+        "mode": "self_care", "medicines": (),
+        "advice": "不用吃药，睡一觉就好",
+    },
+}
+
+#: 挂号/急诊/住院床位的固定价（元）。
+SERVICE_FEES = {
+    "self_care": 0.0,      # 自己买药，不挂号
+    "outpatient": 50.0,    # 门诊挂号
+    "inpatient": 80.0,     # 急诊挂号 + 床位另算
+    "surgery": 80.0,
+}
+
+#: 床位费（元/天），住院类按这个算。
+BED_PER_DAY = 320.0
+
+MODE_LABELS = {
+    "self_care": "自己买药",
+    "outpatient": "门诊",
+    "inpatient": "住院",
+    "surgery": "手术",
+}
+
+
+def medicine(key: str) -> Medicine | None:
+    return MEDICINES.get(str(key or ""))
+
+
+def treatment_of(illness: Illness | None) -> dict[str, Any]:
+    """病情 → 治疗方案。没登记的按轻重给个保守默认。"""
+    if illness is None:
+        return {"mode": "self_care", "medicines": (), "advice": ""}
+    found = TREATMENTS.get(illness.key)
+    if found:
+        return found
+    if illness.admission:
+        return {"mode": "inpatient", "medicines": (), "advice": "住院观察"}
+    return {"mode": "self_care", "medicines": (), "advice": "先观察一下"}
+
+
+def treatment_plan(illness: Illness, rng: random.Random | None = None) -> dict[str, Any]:
+    """把病种总额拆成一条条明细：挂号、药、床位、检查/处置。
+
+    总额仍然是 `Illness.price()` 说了算（和医保、历史记录的口径一致），
+    药品和挂号按固定单价算，剩下的差额进「检查/处置费」——真实账单也是这样，
+    检查费本来就不固定。
+    """
+    total = float(illness.price(rng))
+    plan = treatment_of(illness)
+    mode = str(plan.get("mode") or "self_care")
+    items: list[dict[str, Any]] = []
+
+    fee = float(SERVICE_FEES.get(mode, 0.0))
+    if fee > 0:
+        items.append({"name": "挂号费", "price": round(fee, 2), "kind": "fee"})
+
+    meds: list[dict[str, Any]] = []
+    med_total = 0.0
+    for key in plan.get("medicines") or ():
+        item = medicine(key)
+        if item is None:
+            continue
+        meds.append({"key": item.key, "name": item.name, "price": item.price,
+                     "kind": item.kind, "note": item.note})
+        med_total += float(item.price)
+    if med_total > 0:
+        items.append({"name": "药费", "price": round(med_total, 2), "kind": "medicine"})
+
+    days = 0
+    if mode in ("inpatient", "surgery"):
+        days = max(1, min(7, int(round(illness.hours / 24.0)) or 1))
+        items.append({"name": "床位费（%d 天）" % days,
+                      "price": round(BED_PER_DAY * days, 2), "kind": "bed"})
+
+    if mode == "self_care":
+        # 自己买药：账单上就是一笔「药费」，具体吃了哪几样写在 medicines 里，
+        # 别拆成「药费 + 药费补差」那种看不出名堂的行。
+        items = ([{"name": "药费", "price": round(total, 2), "kind": "medicine"}]
+                 if total > 0 else [])
+
+    used = sum(float(row["price"]) for row in items)
+    if mode == "surgery":
+        # 手术费给固定占比，剩下的算检查/耗材
+        surgery = round(total * 0.55, 2)
+        items.append({"name": "手术费", "price": surgery, "kind": "surgery"})
+        used += surgery
+    rest = round(total - used, 2)
+    if rest > 0:
+        label = "检查费" if mode in ("outpatient", "inpatient", "surgery") else "药费补差"
+        items.append({"name": label, "price": rest, "kind": "exam"})
+    elif rest < 0:
+        # 明细比总额还贵（固定单价定的），按明细算，不让总额变负数
+        total = used
+
+    return {
+        "mode": mode,
+        "mode_label": MODE_LABELS.get(mode, mode),
+        "items": items,
+        "medicines": meds,
+        "advice": str(plan.get("advice") or ""),
+        "total": round(total, 2),
+    }

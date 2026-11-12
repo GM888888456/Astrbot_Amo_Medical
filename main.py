@@ -59,8 +59,13 @@ try:
 except Exception:  # pragma: no cover
     from link import probe as _link_probe, summary as _link_summary  # type: ignore
 
+try:
+    from .catalog import MEDICINES, MODE_LABELS, treatment_plan
+except Exception:  # pragma: no cover
+    from catalog import MEDICINES, MODE_LABELS, treatment_plan  # type: ignore
+
 PLUGIN_NAME = "Astrbot_Amo_Medical"
-PLUGIN_VERSION = "1.2.0"
+PLUGIN_VERSION = "1.3.0"
 DISPLAY_NAME = "我想永远陪着你-医疗"
 
 try:
@@ -259,11 +264,12 @@ class AmoMedicalPlugin(Star):
     # ------------------------------------------------------------------
 
     def quote(self) -> dict[str, Any]:
-        """报个价：总费用、医保报多少、自付多少。"""
+        """报个价：总费用、医保报多少、自付多少，**以及钱花在哪、吃什么药**。"""
         current = get_illness(self._health.illness)
         if current is None:
             return {"ok": False, "reason": "现在没病"}
-        total = current.price(self._rng)
+        plan = treatment_plan(current, self._rng)
+        total = float(plan.get("total") or 0.0)
         split = insurance_split(total, current.admission)
         # 医保个人账户能抵一部分自付
         return {
@@ -274,6 +280,11 @@ class AmoMedicalPlugin(Star):
             "total": split["total"],
             "reimbursed": split["reimbursed"],
             "self_pay": split["self_pay"],
+            "mode": plan.get("mode"),
+            "mode_label": plan.get("mode_label"),
+            "items": plan.get("items") or [],
+            "medicines": plan.get("medicines") or [],
+            "advice": plan.get("advice") or "",
         }
 
     def _companion_balance(self) -> float:
@@ -387,7 +398,10 @@ class AmoMedicalPlugin(Star):
             self._save()
             logger.info("[amo_med] 未支付，%s 继续加重" % info["name"])
             return {"ok": False, "reason": reason or "余额不足", "need": self_pay,
-                    **{k: info[k] for k in ("name", "total", "reimbursed", "self_pay")}}
+                    **{k: info[k] for k in ("name", "total", "reimbursed", "self_pay")},
+                    "mode_label": info.get("mode_label"),
+                    "medicines": info.get("medicines") or [],
+                    "advice": info.get("advice") or ""}
 
         illness = get_illness(info["illness"])
         recovery_hours = max(2, int((illness.hours if illness else 12) / 2))
@@ -402,8 +416,10 @@ class AmoMedicalPlugin(Star):
         )
         self._save()
         logger.info(
-            "[amo_med] 已治疗 %s：总 %.0f，医保报 %.0f，自付 %.0f"
-            % (info["name"], info["total"], info["reimbursed"], self_pay)
+            "[amo_med] 已治疗 %s（%s）：总 %.0f，医保报 %.0f，自付 %.0f，用药 %s"
+            % (info["name"], info.get("mode_label") or "", info["total"],
+               info["reimbursed"], self_pay,
+               "、".join(m.get("name", "") for m in (info.get("medicines") or [])) or "无")
         )
         return {"ok": True, "recovered": True, **info}
 
@@ -467,6 +483,7 @@ class AmoMedicalPlugin(Star):
             ("/history", self.api_history, ["GET"]),
             ("/treat", self.api_treat, ["POST"]),
             ("/fall", self.api_fall, ["POST"]),
+            ("/medicines", self.api_medicines, ["GET"]),
         ]
         for path, handler, methods in routes:
             try:
@@ -478,6 +495,18 @@ class AmoMedicalPlugin(Star):
                     logger.warning("[amo_med] 接口 %s 注册失败: %s" % (path, exc))
             except Exception as exc:
                 logger.warning("[amo_med] 接口 %s 注册失败: %s" % (path, exc))
+
+    async def api_medicines(self):
+        """药价表：面板「医疗」页直接用。"""
+        rows = []
+        for key, item in MEDICINES.items():
+            rows.append({"key": item.key, "name": item.name, "price": item.price,
+                         "kind": item.kind, "note": item.note})
+        rows.sort(key=lambda x: x["price"])
+        return self._json({"code": 0, "data": {
+            "items": rows,
+            "modes": MODE_LABELS,
+        }})
 
     async def api_health(self):
         """我自己连没连上终端/记忆库。面板顶部那一行就看这个。"""
