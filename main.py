@@ -60,12 +60,16 @@ except Exception:  # pragma: no cover
     from link import probe as _link_probe, summary as _link_summary  # type: ignore
 
 try:
-    from .catalog import MEDICINES, MODE_LABELS, treatment_plan
+    from .catalog import (MEDICINES, MODE_LABELS, environment_factors,
+                          next_stage, roll_illness, season_of_month,
+                          treatment_plan)
 except Exception:  # pragma: no cover
-    from catalog import MEDICINES, MODE_LABELS, treatment_plan  # type: ignore
+    from catalog import (MEDICINES, MODE_LABELS, environment_factors,  # type: ignore
+                         next_stage, roll_illness, season_of_month,
+                         treatment_plan)
 
 PLUGIN_NAME = "Astrbot_Amo_Medical"
-PLUGIN_VERSION = "1.3.1"
+PLUGIN_VERSION = "1.4.0"
 DISPLAY_NAME = "我想永远陪着你-医疗"
 
 try:
@@ -121,7 +125,13 @@ class AmoMedicalPlugin(Star):
         self._health = HealthState()
         self._history: list[dict[str, Any]] = []
         self._rng = random.Random()
+        self._last_roll = ""
         self._load()
+        # 后台：一天掷一次「今天会不会不舒服」，以及「拖着不治会不会变重」
+        try:
+            self._auto_task = asyncio.create_task(self._auto_loop())
+        except Exception:
+            self._auto_task = None
         self._register_web_apis()
         logger.info(
             "[amo_med] %s %s 已加载：当前 %s"
@@ -193,6 +203,7 @@ class AmoMedicalPlugin(Star):
             data = {}
         if not isinstance(data, dict):
             data = {}
+        self._last_roll = str(data.get("last_roll") or "")
         health = data.get("health") or {}
         self._health = HealthState(
             status=str(health.get("status") or "健康"),
@@ -207,7 +218,8 @@ class AmoMedicalPlugin(Star):
         self._history = list(history) if isinstance(history, list) else []
 
     def _save(self) -> None:
-        payload = {"health": self._health.as_dict(), "history": self._history[-200:]}
+        payload = {"health": self._health.as_dict(), "history": self._history[-200:],
+                   "last_roll": self._last_roll}
         try:
             tmp = self._state_path() + ".tmp"
             with open(tmp, "w", encoding="utf-8") as fh:
@@ -219,6 +231,69 @@ class AmoMedicalPlugin(Star):
     # ------------------------------------------------------------------
     # 病情
     # ------------------------------------------------------------------
+
+    async def _auto_loop(self) -> None:
+        """每 30 分钟看一次：今天要不要掷骰子、有没有拖成大病。"""
+        import asyncio
+        while True:
+            try:
+                await asyncio.sleep(1800)
+                self._auto_roll()
+                self._progress_roll()
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:
+                logger.debug("[amo_med] 自动病情检查失败: %s" % exc)
+
+    def _auto_roll(self) -> dict[str, Any]:
+        """一天最多掷一次「今天会不会不舒服」。"""
+        if not self._bool("enable_sick_random", True):
+            return {"ok": False, "skipped": "开关关着"}
+        today = datetime.now().strftime("%Y-%m-%d")
+        if self._last_roll == today:
+            return {"ok": False, "skipped": "今天已经掷过"}
+        self._last_roll = today
+        self._save()
+        if self.status().get("sick"):
+            return {"ok": False, "skipped": "已经在病着"}
+
+        base = max(0.0, min(0.5, self._float("sick_prob", 0.02)))
+        ctx = self.context()
+        env = environment_factors(
+            season=ctx.get("season", ""), weather=ctx.get("weather", ""),
+            temp=ctx.get("temp"), satiety=ctx.get("satiety"),
+            hydration=ctx.get("hydration"), tired=ctx.get("tired"),
+            stress=ctx.get("stress"), period_phase=ctx.get("period_phase", ""),
+        )
+        # 环境越差越容易病：湿冷、饿、渴、累、经期各加一点
+        chance = base
+        chance *= 1.0 + 0.6 * bool(env.get("cold")) + 0.4 * bool(env.get("rain"))
+        chance *= 1.0 + 0.5 * bool(env.get("hungry")) + 0.5 * bool(env.get("thirsty"))
+        chance *= 1.0 + 0.4 * bool(env.get("tired")) + 0.3 * bool(env.get("stress"))
+        chance *= 1.0 + 0.3 * bool(env.get("period"))
+        chance = max(0.0, min(0.6, chance))
+        if self._rng.random() >= chance:
+            return {"ok": False, "skipped": "今天没事", "chance": round(chance, 3)}
+        return self.fall_sick()
+
+    def _progress_roll(self) -> dict[str, Any]:
+        """拖着不治：过了病程 60% 还没看，就有机会进到相邻的下一档。"""
+        if not self._bool("worsen_enable", True):
+            return {"ok": False, "skipped": "开关关着"}
+        if self._health.treated or self._health.status in ("健康", "恢复中"):
+            return {"ok": False, "skipped": "没在病着或已经治过"}
+        current = get_illness(self._health.illness)
+        if current is None:
+            return {"ok": False, "skipped": "没有对应病种"}
+        span = max(1.0, float(current.hours) * 3600.0)
+        elapsed = _now() - float(self._health.since or _now())
+        if elapsed < span * 0.6:
+            return {"ok": False, "skipped": "还没到点"}
+        if next_stage(current) is None:
+            return {"ok": False, "skipped": "已经是最后一档"}
+        if self._rng.random() >= 0.25:
+            return {"ok": False, "skipped": "这次没变重"}
+        return self.worsen()
 
     def status(self) -> dict[str, Any]:
         """当前状态；到点了自动好。"""
@@ -235,9 +310,76 @@ class AmoMedicalPlugin(Star):
             "sick": self._health.status in SICK_STATUSES,
         }
 
+    def context(self) -> dict[str, Any]:
+        """今天的环境：季节、天气、温度、吃饱没、累不累、是不是经期。
+
+        天气/心情向终端要，饱食度向记忆库要；要不到的留空，不影响发病判定。
+        """
+        ctx: dict[str, Any] = {
+            "season": season_of_month(datetime.now().month), "weather": "",
+            "temp": None, "satiety": None, "hydration": None,
+            "tired": None, "stress": None, "period_phase": "",
+        }
+        companion = self._companion()
+        state = getattr(companion, "state", None) if companion is not None else None
+        if state is not None:
+            weather = getattr(state, "weather", None) or {}
+            try:
+                ctx["weather"] = str(weather.get("text") or "")
+                if weather.get("temp") is not None:
+                    ctx["temp"] = float(weather.get("temp"))
+            except Exception:
+                pass
+            try:
+                ctx["period_phase"] = str((state.period_info() or {}).get("phase") or "")
+            except Exception:
+                pass
+            try:
+                mood = getattr(state, "mood", None) or {}
+                ctx["tired"] = float(mood.get("疲惫") or 0)
+                ctx["stress"] = max(float(mood.get("焦虑") or 0),
+                                    float(mood.get("暴躁") or 0),
+                                    float(mood.get("生气") or 0))
+            except Exception:
+                pass
+        try:  # 饱食度/水分在记忆库
+            from . import link as _l
+        except ImportError:  # pragma: no cover
+            _l = None  # type: ignore
+        if _l is not None:
+            try:
+                data = _l._find(getattr(self, "context", None),
+                                _l.DATA_NAMES, _l.DATA_MARKERS, require_mem=True)
+                getter = getattr(data, "vitals", None) if data is not None else None
+                if callable(getter):
+                    vitals = getter() or {}
+                    ctx["satiety"] = vitals.get("satiety")
+                    ctx["hydration"] = vitals.get("hydration")
+            except Exception:
+                pass
+        return ctx
+
     def fall_sick(self, key: str = "") -> dict[str, Any]:
-        """让她生病。key 留空就按常见病抽。"""
-        illness = get_illness(key) if key else roll_illness(self._rng)
+        """让她生病。
+
+        ``key`` 留空时按**今天的真实环境**抽：冬天容易感冒、夏天吃坏肚子、
+        饿着渴着容易脱水、经期容易痛经；住院级的病不会被直接抽到，
+        只能从上一档拖出来。
+        """
+        illness = get_illness(key) if key else None
+        if illness is None and not key:
+            ctx = self.context()
+            env = environment_factors(
+                season=ctx.get("season", ""), weather=ctx.get("weather", ""),
+                temp=ctx.get("temp"), satiety=ctx.get("satiety"),
+                hydration=ctx.get("hydration"), tired=ctx.get("tired"),
+                stress=ctx.get("stress"), period_phase=ctx.get("period_phase", ""),
+            )
+            illness = roll_illness(self._rng, season=ctx.get("season", ""), env=env)
+            logger.info("[amo_med] 今天的环境：%s %s %s度 饱%s 水%s → 得病 %s"
+                        % (ctx.get("season"), ctx.get("weather") or "-",
+                           ctx.get("temp"), ctx.get("satiety"), ctx.get("hydration"),
+                           illness.name))
         if illness is None:
             return {"ok": False, "reason": "没有这种病"}
         self._health = HealthState(
@@ -567,4 +709,9 @@ class AmoMedicalPlugin(Star):
         return self._json({"code": 0, "data": result})
 
     async def terminate(self) -> None:
+        try:
+            if getattr(self, "_auto_task", None) is not None:
+                self._auto_task.cancel()
+        except Exception:
+            pass
         self._save()
