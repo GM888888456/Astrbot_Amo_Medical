@@ -1,4 +1,21 @@
-const bridge = window.AstrBotPluginView || window.AstrBotPluginPage;
+/* AstrBot 把 bridge-sdk.js 注入在 app.js **之后**（实测 56 行是本文件、57 行才是 SDK），
+   所以脚本刚执行时 window.AstrBotPluginView 还不存在——只抓一次就会永远抓不到，
+   面板会一直「读取失败」。这里每次调用都重新找，并给启动加一个等待桥接的重试。 */
+let bridge = null;
+function resolveBridge() {
+  if (bridge) return bridge;
+  const candidates = [];
+  try { candidates.push(window.AstrBotPluginView, window.AstrBotPluginPage); } catch (err) {}
+  try { candidates.push(window.parent.AstrBotPluginView, window.parent.AstrBotPluginPage); } catch (err) {}
+  try { candidates.push(window.top.AstrBotPluginView, window.top.AstrBotPluginPage); } catch (err) {}
+  bridge = candidates.find((item) => item && typeof item.apiGet === "function") || null;
+  return bridge;
+}
+function waitForBridge(fn, tries) {
+  const left = (typeof tries === "number") ? tries : 50;   // 默认最多等 6 秒
+  if (resolveBridge()) { fn(); return; }
+  if (left > 0) setTimeout(() => waitForBridge(fn, left - 1), 120);
+}
 const $ = (id) => document.getElementById(id);
 
 function unwrap(res) {
@@ -8,8 +25,14 @@ function unwrap(res) {
   if (v && typeof v === "object" && "data" in v && v.code === undefined) v = v.data;
   return v;
 }
-async function get(p) { try { return bridge ? unwrap(await bridge.apiGet(p)) : null; } catch (e) { return null; } }
-async function post(p, b) { try { return bridge ? unwrap(await bridge.apiPost(p, b || {})) : null; } catch (e) { return null; } }
+async function get(p) {
+  const b = resolveBridge();
+  try { return b ? unwrap(await b.apiGet(p)) : null; } catch (e) { return null; }
+}
+async function post(p, body) {
+  const b = resolveBridge();
+  try { return b ? unwrap(await b.apiPost(p, body || {})) : null; } catch (e) { return null; }
+}
 const money = (v) => "¥" + Number(v || 0).toFixed(2);
 
 async function load() {
@@ -57,7 +80,7 @@ $("treatBtn").addEventListener("click", async () => {
   load();
 });
 
-load();
+waitForBridge(load);
 setInterval(load, 30000);
 
 /* ---- 连接状态：我这个挂载插件自己有没有连上终端/记忆库 ---- */
