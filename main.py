@@ -60,7 +60,7 @@ except Exception:  # pragma: no cover
     from link import probe as _link_probe, summary as _link_summary  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Medical"
-PLUGIN_VERSION = "1.1.3"
+PLUGIN_VERSION = "1.2.0"
 DISPLAY_NAME = "我想永远陪着你-医疗"
 
 try:
@@ -276,6 +276,17 @@ class AmoMedicalPlugin(Star):
             "self_pay": split["self_pay"],
         }
 
+    def _companion_balance(self) -> float:
+        """终端那边的余额；读不到按 0 算（= 付不起，先扛）。"""
+        companion = self._companion()
+        getter = getattr(companion, "balance", None) if companion is not None else None
+        if not callable(getter):
+            return 0.0
+        try:
+            return float(getter() or 0)
+        except Exception:
+            return 0.0
+
     COMPANION_NAMES = ("Astrbot_Amo_forever", "astrbot_plugin_amo_forever", "amo_forever")
 
     def _companion(self):
@@ -310,8 +321,13 @@ class AmoMedicalPlugin(Star):
                 return value
         return None
 
-    async def treat(self) -> dict[str, Any]:
-        """走完整流程：报价 → 请终端扣款 → 扣到就治，扣不到不治。"""
+    async def treat(self, auto: bool = False) -> dict[str, Any]:
+        """走完整流程：报价 → 请终端扣款 → 扣到就治，扣不到不治。
+
+        ``auto=True`` 表示是后台自动判断触发的（终端循环）；面板上的按钮走
+        ``auto=False``。两种入口的差别只有「要不要拦」：自动模式下尊重
+        ``auto_treat`` / ``tough_it_out`` 两个配置，手动点了就一定去治。
+        """
         # 已经治好了就别再扣一次：病情结束后 illness 会被清空，
         # 这里再兜一层，防止后台循环和手动指令撞在一起重复扣款。
         if self._health.treated and self._health.status not in ("健康", "恢复中"):
@@ -320,8 +336,16 @@ class AmoMedicalPlugin(Star):
         info = self.quote()
         if not info.get("ok"):
             return {"ok": False, "reason": info.get("reason") or "现在没病"}
-
+        if auto and not self._bool("auto_treat", True):
+            return {"ok": False, "skipped": True, "manual": True,
+                    "reason": "自动就医关着，等手动处理"}
         self_pay = float(info["self_pay"])
+        if auto and self._bool("tough_it_out", True) and self_pay > 0:
+            illness = get_illness(info.get("illness") or "")
+            balance = self._companion_balance()
+            if illness is not None and will_tough_it_out(illness, balance, self_pay, self._rng):
+                return {"ok": False, "skipped": True, "tough": True,
+                        "reason": "小病先扛一扛", "self_pay": self_pay}
         paid = True
         reason = ""
 
@@ -467,6 +491,8 @@ class AmoMedicalPlugin(Star):
             "link": _link_probe(self),
             "health": info, "quote": quote,
             "used_insurance": self._health.used_insurance,
+            "auto_treat": self._bool("auto_treat", True),
+            "tough_it_out": self._bool("tough_it_out", True),
             "uptime": int(_now() - self._started_at),
         }})
 
@@ -474,7 +500,7 @@ class AmoMedicalPlugin(Star):
         return self._json({"code": 0, "data": {"items": list(reversed(self._history))}})
 
     async def api_treat(self):
-        result = await self.treat()
+        result = await self.treat(auto=False)
         return self._json({"code": 0, "data": result})
 
     async def api_fall(self):

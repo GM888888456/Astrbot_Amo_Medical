@@ -49,6 +49,11 @@ async function load() {
   const q = d.quote || {};
   if (h.sick && q.ok) {
     $("quoteCard").hidden = false;
+    // 按钮是「手动催一下」：平时是她自己决定去不去，按钮只用来现在就去
+    $("treatBtn").textContent = d.auto_treat === false ? "手动就医（自动已关）" : "立即就医";
+    $("autoHint").textContent = d.auto_treat === false
+      ? "自动就医已关闭：她不会自己去看病，需要在这里点。"
+      : ("她自己会去看病" + (d.tough_it_out === false ? "（不硬扛）" : "（小病可能先扛一会儿）") + "；按钮只是让她现在就去。");
     $("total").textContent = money(q.total);
     $("reimbursed").textContent = money(q.reimbursed);
     $("selfpay").textContent = money(q.self_pay);
