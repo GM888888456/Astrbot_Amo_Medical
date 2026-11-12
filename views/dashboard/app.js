@@ -15,6 +15,7 @@ const money = (v) => "¥" + Number(v || 0).toFixed(2);
 async function load() {
   const d = await get("status");
   if (!d) { $("status").textContent = "读取失败"; return; }
+  if (d.link) amoLinkRender(d.link);
   const h = d.health || {};
   $("statePill").textContent = h.sick ? "生病中" : "健康";
   $("status").textContent = h.status || "健康";
@@ -76,8 +77,18 @@ function amoLinkRender(d) {
   box.title = d.error || "";
 }
 
+async function amoLinkFetch() {
+  try { return await get("health"); } catch (e) { return null; }
+}
 async function amoLinkLoad() {
-  try { amoLinkRender(await get("health")); } catch (e) { amoLinkRender(null); }
+  // 面板脚本比 AstrBot 的桥接先跑，头几次拿不到数据是正常的：
+  // 等桥接就绪再重试，别一上来就把「读不到」画给人看。
+  for (let i = 0; i < 20; i += 1) {
+    const d = await amoLinkFetch();
+    if (d) { amoLinkRender(d); return; }
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  amoLinkRender(null);
 }
 
 amoLinkLoad();
