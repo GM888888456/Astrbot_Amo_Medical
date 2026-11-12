@@ -55,7 +55,7 @@ except Exception:  # pragma: no cover
     )
 
 PLUGIN_NAME = "Astrbot_Amo_Medical"
-PLUGIN_VERSION = "1.0.0"
+PLUGIN_VERSION = "1.0.1"
 DISPLAY_NAME = "我想永远陪着你-医疗"
 
 try:
@@ -307,6 +307,11 @@ class AmoMedicalPlugin(Star):
 
     async def treat(self) -> dict[str, Any]:
         """走完整流程：报价 → 请终端扣款 → 扣到就治，扣不到不治。"""
+        # 已经治好了就别再扣一次：病情结束后 illness 会被清空，
+        # 这里再兜一层，防止后台循环和手动指令撞在一起重复扣款。
+        if self._health.treated and self._health.status not in ("健康", "恢复中"):
+            return {"ok": True, "repeated": True, "name": self._health.status,
+                    "reason": "已经治过了"}
         info = self.quote()
         if not info.get("ok"):
             return {"ok": False, "reason": info.get("reason") or "现在没病"}
@@ -348,12 +353,17 @@ class AmoMedicalPlugin(Star):
             return {"ok": False, "reason": reason or "余额不足", "need": self_pay,
                     **{k: info[k] for k in ("name", "total", "reimbursed", "self_pay")}}
 
+        illness = get_illness(info["illness"])
+        recovery_hours = max(2, int((illness.hours if illness else 12) / 2))
+        # 病结束：状态进入「恢复中」，不再算 sick，后台循环也就不会重复来治
+        self._health.status = "恢复中"
+        self._health.illness = ""
+        self._health.note = "刚看完病，还在恢复"
         self._health.treated = True
+        self._health.until = _now() + recovery_hours * 3600
         self._health.used_insurance = round(
             self._health.used_insurance + float(info["reimbursed"]), 2
         )
-        # 治好了：留一半恢复时间
-        self._health.until = _now() + max(1, int((self._health.until - _now()) / 2))
         self._save()
         logger.info(
             "[amo_med] 已治疗 %s：总 %.0f，医保报 %.0f，自付 %.0f"
