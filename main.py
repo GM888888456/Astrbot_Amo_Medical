@@ -54,8 +54,13 @@ except Exception:  # pragma: no cover
         will_tough_it_out,
     )
 
+try:
+    from .link import probe as _link_probe, summary as _link_summary
+except Exception:  # pragma: no cover
+    from link import probe as _link_probe, summary as _link_summary  # type: ignore
+
 PLUGIN_NAME = "Astrbot_Amo_Medical"
-PLUGIN_VERSION = "1.0.2"
+PLUGIN_VERSION = "1.1.0"
 DISPLAY_NAME = "我想永远陪着你-医疗"
 
 try:
@@ -327,9 +332,16 @@ class AmoMedicalPlugin(Star):
                 paid = False
                 reason = "没连上终端"
             else:
+                # 幂等号：同一次病只扣一次，重试/并发都认这个号
+                request_id = "med-%s-%d" % (
+                    str(info.get("illness") or info.get("name") or "sick"),
+                    int(self._health.since or 0),
+                )
                 try:
                     result = await companion.charge(
-                        self_pay, reason="%s治疗" % info["name"], payee="医院"
+                        self_pay, reason="%s治疗" % info["name"], payee="医院",
+                        request_id=request_id, source="medical",
+                        detail=str(info.get("name") or ""),
                     )
                     paid = bool(result.get("ok"))
                     reason = str(result.get("reason") or "")
@@ -427,6 +439,7 @@ class AmoMedicalPlugin(Star):
     def _register_web_apis(self) -> None:
         routes = [
             ("/status", self.api_status, ["GET"]),
+            ("/health", self.api_health, ["GET"]),
             ("/history", self.api_history, ["GET"]),
             ("/treat", self.api_treat, ["POST"]),
             ("/fall", self.api_fall, ["POST"]),
@@ -442,11 +455,16 @@ class AmoMedicalPlugin(Star):
             except Exception as exc:
                 logger.warning("[amo_med] 接口 %s 注册失败: %s" % (path, exc))
 
+    async def api_health(self):
+        """我自己连没连上终端/记忆库。面板顶部那一行就看这个。"""
+        return self._json({"code": 0, "data": _link_probe(self)})
+
     async def api_status(self):
         info = self.status()
         quote = self.quote() if info["sick"] else {}
         return self._json({"code": 0, "data": {
             "name": PLUGIN_NAME, "version": PLUGIN_VERSION, "display_name": DISPLAY_NAME,
+            "link": _link_probe(self),
             "health": info, "quote": quote,
             "used_insurance": self._health.used_insurance,
             "uptime": int(_now() - self._started_at),
