@@ -1,0 +1,44 @@
+{
+  "enable": {
+    "type": "bool",
+    "description": "启用病情系统",
+    "default": true,
+    "hint": "关掉后不再随机生病，也不能治疗。"
+  },
+  "enable_sick_random": {
+    "type": "bool",
+    "description": "每天随机生病",
+    "default": true,
+    "hint": "按概率抽病。天气下雨、气温低、经期、过度疲惫都会提高概率。"
+  },
+  "sick_prob": {
+    "type": "float",
+    "description": "基础生病概率",
+    "default": 0.02,
+    "hint": "每天抽一次。0.02 = 大约 50 天一次；雨天 +0.03，低温 +0.02。"
+  },
+  "auto_treat": {
+    "type": "bool",
+    "description": "生病后自动去治",
+    "default": true,
+    "hint": "关掉就完全由终端决定什么时候治——她可能一直扛着。"
+  },
+  "tough_it_out": {
+    "type": "bool",
+    "description": "小病会先硬扛",
+    "default": true,
+    "hint": "打开后，不严重的病有概率先不去医院，拖重了才去。这比「一生病就去」像人。"
+  },
+  "insurance_enable": {
+    "type": "bool",
+    "description": "启用医保",
+    "default": true,
+    "hint": "门诊报 70%、住院报 85%，超过 2 万再二次报销 60%。关掉就全额自费。"
+  },
+  "worsen_enable": {
+    "type": "bool",
+    "description": "不治会变重",
+    "default": true,
+    "hint": "拖着不治，小病会升级成大病：轻微不适→感冒→发烧→肠胃炎→阑尾炎。"
+  }
+}

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>我想永远陪着你-医疗</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand"><span class="dot"></span><span>我想永远陪着你 · 医疗</span></div>
+    </header>
+
+    <div class="card">
+      <div class="card-title"><span>身体</span><span class="pill" id="statePill">—</span></div>
+      <dl class="kv">
+        <dt>症状</dt><dd id="status">—</dd>
+        <dt>描述</dt><dd id="note">—</dd>
+        <dt>是否就医</dt><dd id="treated">—</dd>
+        <dt>医保已用</dt><dd id="used">—</dd>
+      </dl>
+      <div class="meta" id="timeHint"></div>
+    </div>
+
+    <div class="card" id="quoteCard" hidden>
+      <div class="card-title"><span>治疗报价</span></div>
+      <dl class="kv">
+        <dt>总费用</dt><dd id="total">—</dd>
+        <dt>医保报销</dt><dd id="reimbursed">—</dd>
+        <dt>需自付</dt><dd id="selfpay">—</dd>
+      </dl>
+      <div class="row">
+        <button class="btn" id="treatBtn">去看病</button>
+        <span class="hint" id="treatHint"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span>就医记录</span></div>
+      <ul class="list" id="history"><li class="empty">还没有记录</li></ul>
+    </div>
+
+    <div class="foot">反馈群 1055679275</div>
+  </div>
+  <script src="./app.js"></script>
+</body>
+</html>
