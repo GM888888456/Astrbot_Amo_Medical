@@ -55,7 +55,7 @@ except Exception:  # pragma: no cover
     )
 
 PLUGIN_NAME = "Astrbot_Amo_Medical"
-PLUGIN_VERSION = "1.0.1"
+PLUGIN_VERSION = "1.0.2"
 DISPLAY_NAME = "我想永远陪着你-医疗"
 
 try:
