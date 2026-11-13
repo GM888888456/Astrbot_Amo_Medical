@@ -9,7 +9,7 @@
 <body>
   <div class="wrap">
     <header>
-      <div class="brand"><span class="dot"></span><span>我想永远陪着你 · 医疗</span></div>
+      <div class="brand" id="brandTitle" title="双击改生理期"><span class="dot"></span><span>我想永远陪着你 · 医疗</span></div>
     </header>
 <div id="linkbar" style="margin:8px 0 4px;padding:8px 10px;border-radius:10px;background:rgba(128,128,128,.10);font-size:12px;line-height:1.6">连接状态：检查中…</div>
 
@@ -49,6 +49,19 @@
     </div>
 
     <div class="foot">反馈群 1055679275</div>
+  </div>
+
+  <div class="modal" id="periodModal" hidden>
+    <div class="modal-card">
+      <div class="card-title"><span>生理期设置</span><span class="hint">双击「医疗」标题打开</span></div>
+      <label class="field"><span>周期天数</span><input id="periodCycle" type="number" min="10" max="60" /></label>
+      <label class="field"><span>上次开始</span><input id="periodStart" type="date" /></label>
+      <div class="row between" style="margin-top:10px">
+        <button id="periodSave" class="btn">保存</button>
+        <button id="periodClose" class="btn">关闭</button>
+      </div>
+      <div class="meta" id="periodHint">数值生效后，生理期开始会给她 Energy−20 / Anger+15 / 身+20</div>
+    </div>
   </div>
   <script src="./app.js?v=1.4.4"></script>
 </body>

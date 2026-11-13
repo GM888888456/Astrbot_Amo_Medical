@@ -67,7 +67,7 @@ except Exception:  # pragma: no cover
                          treatment_plan)
 
 PLUGIN_NAME = "Astrbot_Amo_Medical"
-PLUGIN_VERSION = "1.4.9"
+PLUGIN_VERSION = "1.5.0"
 DISPLAY_NAME = "我想永远陪着你-医疗"
 
 try:
@@ -647,6 +647,7 @@ class AmoMedicalPlugin(Star):
             ("/treat", self.api_treat, ["POST"]),
             ("/fall", self.api_fall, ["POST"]),
             ("/medicines", self.api_medicines, ["GET"]),
+            ("/period", self.api_period, ["GET", "POST"]),
         ]
         for path, handler, methods in routes:
             try:
@@ -658,6 +659,42 @@ class AmoMedicalPlugin(Star):
                     logger.warning("[amo_med] 接口 %s 注册失败: %s" % (path, exc))
             except Exception as exc:
                 logger.warning("[amo_med] 接口 %s 注册失败: %s" % (path, exc))
+
+    def _period_info(self) -> dict:
+        """从终端读生理期状态；终端没连就返回空。"""
+        terminal = self._companion()
+        state = getattr(terminal, "state", None) if terminal is not None else None
+        if state is None:
+            return {}
+        try:
+            return dict(state.period_info() or {})
+        except Exception:
+            return {}
+
+    async def api_period(self):
+        """生理期设置：GET 读，POST（cycle_days / start）写。数值由终端算，这里只转发。"""
+        terminal = self._companion()
+        state = getattr(terminal, "state", None) if terminal is not None else None
+        if state is None:
+            return self._json({"code": 1, "message": "终端未连接，生理期设置需要它"})
+        payload = {}
+        try:
+            payload = await self._payload()
+        except Exception:
+            payload = {}
+        payload = payload if isinstance(payload, dict) else {}
+        cycle_days = payload.get("cycle_days")
+        start = str(payload.get("start") or "").strip()
+        if cycle_days or start:
+            try:
+                info = state.set_period_settings(cycle_days, start or None)
+            except Exception as exc:
+                return self._json({"code": 1, "message": "设置失败：%s" % exc})
+            logger.info("[amo_med] 生理期设置已更新：周期 %s 天，上次 %s",
+                        info.get("cycle_days"), start or "不变")
+        else:
+            info = self._period_info()
+        return self._json({"code": 0, "data": info})
 
     async def api_medicines(self):
         """药价表：面板「医疗」页直接用。"""
@@ -685,6 +722,7 @@ class AmoMedicalPlugin(Star):
             "used_insurance": self._health.used_insurance,
             "auto_treat": self._bool("auto_treat", True),
             "tough_it_out": self._bool("tough_it_out", True),
+            "period": self._period_info(),
             "uptime": int(_now() - self._started_at),
         }})
 

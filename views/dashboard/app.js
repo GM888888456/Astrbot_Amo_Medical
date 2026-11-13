@@ -134,3 +134,52 @@ async function amoLinkLoad() {
 
 amoLinkLoad();
 setInterval(amoLinkLoad, 30000);
+
+/* 生理期设置：双击「医疗」标题打开（数值由终端算，这里只转发） */
+function fillPeriod(info) {
+  const data = info || {};
+  const cycle = $("periodCycle");
+  const start = $("periodStart");
+  if (cycle && data.cycle_days) cycle.value = String(data.cycle_days);
+  if (start && data.last_start) start.value = String(data.last_start);
+  const hint = $("periodHint");
+  if (hint && data.phase) {
+    hint.textContent = "当前：" + data.phase + (data.day ? " · 第" + data.day + "天" : "") +
+      (data.next_start ? " · 下次 " + data.next_start : "");
+  }
+}
+
+async function loadPeriod() {
+  const info = await get("period");
+  fillPeriod(info);
+}
+
+function bindPeriodDialog() {
+  const title = $("brandTitle");
+  const modal = $("periodModal");
+  if (!title || !modal) return;
+  title.addEventListener("dblclick", () => {
+    modal.hidden = false;
+    loadPeriod();
+  });
+  const close = $("periodClose");
+  if (close) close.addEventListener("click", () => { modal.hidden = true; });
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) modal.hidden = true;
+  });
+  const save = $("periodSave");
+  if (save) save.addEventListener("click", async () => {
+    const body = { cycle_days: Number($("periodCycle").value || 0) };
+    const start = $("periodStart").value;
+    if (start) body.start = start;
+    const info = await post("period", body);
+    if (info) {
+      fillPeriod(info);
+      $("periodHint").textContent = "已保存：周期 " + (info.cycle_days || "?") + " 天";
+    } else {
+      $("periodHint").textContent = "保存失败：终端没连上";
+    }
+  });
+}
+waitForBridge(bindPeriodDialog);
+waitForBridge(loadPeriod);
