@@ -50,10 +50,7 @@ async function load() {
   if (h.sick && q.ok) {
     $("quoteCard").hidden = false;
     // 按钮是「手动催一下」：平时是她自己决定去不去，按钮只用来现在就去
-    $("treatBtn").textContent = d.auto_treat === false ? "手动就医（自动已关）" : "立即就医";
-    $("autoHint").textContent = d.auto_treat === false
-      ? "自动就医已关闭：她不会自己去看病，需要在这里点。"
-      : ("她自己会去看病" + (d.tough_it_out === false ? "（不硬扛）" : "（小病可能先扛一会儿）") + "；按钮只是让她现在就去。");
+    $("autoHint").textContent = "她不会自己去看病；你说「走我带你去医院」才去。";
     $("total").textContent = money(q.total);
     $("reimbursed").textContent = money(q.reimbursed);
     $("selfpay").textContent = money(q.self_pay);
@@ -76,14 +73,6 @@ async function loadHistory() {
       (it.paid ? money(it.self_pay) : "未付") + "</span></li>";
   }).join("");
 }
-
-$("treatBtn").addEventListener("click", async () => {
-  $("treatHint").textContent = "处理中…";
-  const r = await post("treat", {});
-  if (!r) { $("treatHint").textContent = "失败了"; return; }
-  $("treatHint").textContent = r.ok ? "治好了" : ("没治成：" + (r.reason || "余额不足"));
-  load();
-});
 
 waitForBridge(load);
 setInterval(load, 30000);
