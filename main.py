@@ -67,7 +67,7 @@ except Exception:  # pragma: no cover
                          treatment_plan)
 
 PLUGIN_NAME = "Astrbot_Amo_Medical"
-PLUGIN_VERSION = "1.5.3"
+PLUGIN_VERSION = "1.5.4"
 DISPLAY_NAME = "我想永远陪着你-医疗"
 
 try:
@@ -787,7 +787,28 @@ class AmoMedicalPlugin(Star):
         return self._json({"code": 0, "data": {
             "items": rows,
             "modes": MODE_LABELS,
+            "market_total": self._market_drug_total(),
         }})
+
+    def _market_drug_total(self) -> int:
+        """市场插件里一共多少种药；拿不到就退回 161（当前目录规模）。"""
+        try:
+            for meta in self.context.get_all_stars():
+                text = (str(getattr(meta, "name", "") or "") + " "
+                        + str(getattr(meta, "module_path", "") or ""))
+                if "Marketplace" not in text and "市场" not in text:
+                    continue
+                for attr in ("star_cls", "star", "instance"):
+                    obj = getattr(meta, attr, None)
+                    if obj is None:
+                        continue
+                    inst = obj() if isinstance(obj, type) else obj
+                    counts = getattr(inst, "counts", None)
+                    if callable(counts):
+                        return int((counts() or {}).get("drugs") or 0)
+        except Exception as exc:
+            logger.debug("[amo_med] 读市场药数失败: %s" % exc)
+        return 161
 
     async def api_health(self):
         """我自己连没连上终端/记忆库。面板顶部那一行就看这个。"""

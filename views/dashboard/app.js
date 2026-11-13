@@ -81,7 +81,8 @@ async function loadDrugPrices() {
     [pool[i], pool[j]] = [pool[j], pool[i]];
   }
   const shown = pool.slice(0, 15);
-  $("drugHint").textContent = "今日 15 种 / 共 " + items.length + " 种";
+  const marketTotal = (d && d.market_total) || items.length;
+  $("drugHint").textContent = "今日 15 种 / 市场共 " + marketTotal + " 种";
   list.innerHTML = shown.map((it) =>
     '<li><span class="p">' + (it.name || it.key) + '</span>' +
     '<span class="s">' + money(it.price) + '</span></li>'
