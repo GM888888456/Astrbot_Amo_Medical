@@ -67,7 +67,7 @@ except Exception:  # pragma: no cover
                          treatment_plan)
 
 PLUGIN_NAME = "Astrbot_Amo_Medical"
-PLUGIN_VERSION = "1.5.4"
+PLUGIN_VERSION = "1.5.5"
 DISPLAY_NAME = "我想永远陪着你-医疗"
 
 try:
@@ -514,6 +514,27 @@ class AmoMedicalPlugin(Star):
             return {"ok": False, "reason": "现在没病"}
         plan = treatment_plan(current, self._rng)
         total = float(plan.get("total") or 0.0)
+        # 药价改查市场：同一名字的药，用市场当天价，并把差额算进总额
+        try:
+            market = self._market_drug_prices()
+            if market:
+                meds = plan.get("medicines") or []
+                old_med = sum(float(m.get("price") or 0) for m in meds)
+                new_med = 0.0
+                for med in meds:
+                    price = market.get(str(med.get("name") or ""))
+                    if price:
+                        med["price"] = round(float(price), 2)
+                    new_med += float(med.get("price") or 0)
+                if meds and abs(new_med - old_med) > 0.01:
+                    delta = round(new_med - old_med, 2)
+                    total = round(max(0.0, total + delta), 2)
+                    plan["total"] = total
+                    for row in plan.get("items") or []:
+                        if str(row.get("kind")) == "medicine":
+                            row["price"] = round(new_med, 2)
+        except Exception as exc:
+            logger.debug("[amo_med] 药价接市场失败: %s" % exc)
         split = insurance_split(total, current.admission)
         # 医保个人账户能抵一部分自付
         return {
@@ -530,6 +551,30 @@ class AmoMedicalPlugin(Star):
             "medicines": plan.get("medicines") or [],
             "advice": plan.get("advice") or "",
         }
+
+    def _market_drug_prices(self) -> dict[str, float]:
+        """市场插件当天的药价（名字 → 价格），拿不到就返回空。"""
+        try:
+            for meta in self.context.get_all_stars():
+                text = (str(getattr(meta, "name", "") or "") + " "
+                        + str(getattr(meta, "module_path", "") or ""))
+                if "Marketplace" not in text and "市场" not in text:
+                    continue
+                inst = None
+                for attr in ("star_cls", "star", "instance"):
+                    obj = getattr(meta, attr, None)
+                    if obj is None:
+                        continue
+                    inst = obj() if isinstance(obj, type) else obj
+                    break
+                items = getattr(inst, "items", None) if inst is not None else None
+                if callable(items):
+                    return {str(row.get("name") or ""): float(row.get("price") or 0)
+                            for row in (items("drugs") or [])
+                            if row.get("name") and float(row.get("price") or 0) > 0}
+        except Exception as exc:
+            logger.debug("[amo_med] 读市场药价失败: %s" % exc)
+        return {}
 
     def _companion_balance(self) -> float:
         """终端那边的余额；读不到按 0 算（= 付不起，先扛）。"""
