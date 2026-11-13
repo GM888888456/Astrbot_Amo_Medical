@@ -67,8 +67,22 @@ async function loadDrugPrices() {
   const items = (d && d.items) || [];
   const list = $("drugPrices");
   if (!items.length) { list.innerHTML = '<li class="empty">没有药价</li>'; return; }
-  $("drugHint").textContent = items.length + " 种";
-  list.innerHTML = items.slice(0, 24).map((it) =>
+  // 每天随机挑 15 种（同一天固定，换天才换）
+  const today = new Date();
+  const seed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
+  let x = seed >>> 0;
+  const rnd = () => {
+    x ^= x << 13; x >>>= 0; x ^= x >> 17; x ^= x << 5; x >>>= 0;
+    return x / 4294967296;
+  };
+  const pool = items.slice();
+  for (let i = pool.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(rnd() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  const shown = pool.slice(0, 15);
+  $("drugHint").textContent = "今日 15 种 / 共 " + items.length + " 种";
+  list.innerHTML = shown.map((it) =>
     '<li><span class="p">' + (it.name || it.key) + '</span>' +
     '<span class="s">' + money(it.price) + '</span></li>'
   ).join("");

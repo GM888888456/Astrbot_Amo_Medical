@@ -2,7 +2,7 @@ name: Astrbot_Amo_Medical
 display_name: 我想永远陪着你-医疗
 desc: 我想永远陪着你-医疗：分级病情、治疗报价、医保报销，治病前先向终端申请扣款，扣不到就不治
 short_desc: 我想永远陪着你-医疗
-version: 1.5.2
+version: 1.5.3
 author: 墨辞烟
 astrbot_version: ">=4.5.7"
 repo: https://github.com/GM888888456/Astrbot_Amo_Medical/
