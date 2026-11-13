@@ -1,5 +1,9 @@
 # 更新日志
 
+## 1.5.2（生病/治好也发事件）
+
+- 新增 `_emit_health_event()`：生病时发 `medical_sick`（severity 6），治好发 `medical_treated`；每天各一次，仍然只发事件、不碰心流数值。
+
 ## 1.5.1（生理期只发事件，不碰心流）
 
 - 新增 `_emit_period_event()`：检测到第 1 天发 `period_start`（带痛经等级），干净后第 1 天发 `period_end`；每天各一次，记在插件自己的状态里。

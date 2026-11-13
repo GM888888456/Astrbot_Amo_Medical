@@ -67,7 +67,7 @@ except Exception:  # pragma: no cover
                          treatment_plan)
 
 PLUGIN_NAME = "Astrbot_Amo_Medical"
-PLUGIN_VERSION = "1.5.1"
+PLUGIN_VERSION = "1.5.2"
 DISPLAY_NAME = "我想永远陪着你-医疗"
 
 try:
@@ -243,10 +243,41 @@ class AmoMedicalPlugin(Star):
                 self._auto_roll()
                 self._progress_roll()
                 self._emit_period_event()
+                self._emit_health_event()
             except asyncio.CancelledError:
                 return
             except Exception as exc:
                 logger.debug("[amo_med] 自动病情检查失败: %s" % exc)
+
+    def _emit_health_event(self) -> None:
+        """生病/治好：只发事件，心流加减交给终端。"""
+        terminal = self._companion()
+        emitter = getattr(terminal, "emit_event", None) if terminal is not None else None
+        if not callable(emitter):
+            return
+        info = self.status() or {}
+        today = datetime.now().strftime("%Y-%m-%d")
+        marks = self._state.get("health_events")
+        if not isinstance(marks, dict):
+            marks = {}
+        changed = False
+        if info.get("sick") and marks.get("sick_day") != today:
+            try:
+                emitter("medical_sick", {"severity": 6})
+            except Exception as exc:
+                logger.debug("[amo_med] 发 medical_sick 失败: %s" % exc)
+            marks["sick_day"] = today
+            changed = True
+        if getattr(self._health, "treated", False) and marks.get("treated_day") != today:
+            try:
+                emitter("medical_treated", {})
+            except Exception as exc:
+                logger.debug("[amo_med] 发 medical_treated 失败: %s" % exc)
+            marks["treated_day"] = today
+            changed = True
+        if changed:
+            self._state["health_events"] = marks
+            self._save()
 
     def _emit_period_event(self) -> None:
         """生理期开始/结束：只发事件给终端总线，本插件不碰心流数值。
