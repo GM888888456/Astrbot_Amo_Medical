@@ -47,17 +47,31 @@ async function load() {
   $("used").textContent = money(d.used_insurance);
 
   const q = d.quote || {};
+  $("quoteCard").hidden = false;
   if (h.sick && q.ok) {
-    $("quoteCard").hidden = false;
-    // 按钮是「手动催一下」：平时是她自己决定去不去，按钮只用来现在就去
     $("autoHint").textContent = "她自己会去看病（钱不够会先扛着）；你催她、带她去并兜底时，才走手动就医。";
     $("total").textContent = money(q.total);
     $("reimbursed").textContent = money(q.reimbursed);
     $("selfpay").textContent = money(q.self_pay);
   } else {
-    $("quoteCard").hidden = true;
+    $("total").textContent = "—";
+    $("reimbursed").textContent = "—";
+    $("selfpay").textContent = "—";
+    $("autoHint").textContent = "现在没病，不用治。";
   }
   loadHistory();
+}
+
+async function loadDrugPrices() {
+  const d = await get("medicines");
+  const items = (d && d.items) || [];
+  const list = $("drugPrices");
+  if (!items.length) { list.innerHTML = '<li class="empty">没有药价</li>'; return; }
+  $("drugHint").textContent = items.length + " 种";
+  list.innerHTML = items.slice(0, 24).map((it) =>
+    '<li><span class="p">' + (it.name || it.key) + '</span>' +
+    '<span class="s">' + money(it.price) + '</span></li>'
+  ).join("");
 }
 
 async function loadHistory() {
@@ -75,7 +89,9 @@ async function loadHistory() {
 }
 
 waitForBridge(load);
+waitForBridge(loadDrugPrices);
 setInterval(load, 30000);
+setInterval(loadDrugPrices, 300000);
 
 /* ---- 连接状态：我这个挂载插件自己有没有连上终端/记忆库 ---- */
 function amoLinkDot(ok) { return '<span style="color:' + (ok ? "#2e9e5b" : "#d83b3b") + '">\u25cf</span>'; }
