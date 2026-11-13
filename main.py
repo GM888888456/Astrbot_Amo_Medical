@@ -67,7 +67,7 @@ except Exception:  # pragma: no cover
                          treatment_plan)
 
 PLUGIN_NAME = "Astrbot_Amo_Medical"
-PLUGIN_VERSION = "1.5.0"
+PLUGIN_VERSION = "1.5.1"
 DISPLAY_NAME = "我想永远陪着你-医疗"
 
 try:
@@ -233,15 +233,65 @@ class AmoMedicalPlugin(Star):
     async def _auto_loop(self) -> None:
         """每 30 分钟看一次：今天要不要掷骰子、有没有拖成大病。"""
         import asyncio
+        first = True
         while True:
             try:
+                if first:
+                    first = False
+                    self._emit_period_event()
                 await asyncio.sleep(1800)
                 self._auto_roll()
                 self._progress_roll()
+                self._emit_period_event()
             except asyncio.CancelledError:
                 return
             except Exception as exc:
                 logger.debug("[amo_med] 自动病情检查失败: %s" % exc)
+
+    def _emit_period_event(self) -> None:
+        """生理期开始/结束：只发事件给终端总线，本插件不碰心流数值。
+
+        事件里带 ``severity``（痛经等级 0–10），由 heartflow 决定加减多少。
+        """
+        terminal = self._companion()
+        emitter = getattr(terminal, "emit_event", None) if terminal is not None else None
+        if not callable(emitter):
+            return
+        info = self._period_info() or {}
+        try:
+            day = int(info.get("day") or 0)
+            bleed = int(info.get("bleed_days") or 0)
+        except (TypeError, ValueError):
+            return
+        if not day or not bleed:
+            return
+        today = datetime.now().strftime("%Y-%m-%d")
+        marks = self._state.get("period_events")
+        if not isinstance(marks, dict):
+            marks = {}
+        try:
+            pain = float(info.get("pain") or 3)
+        except (TypeError, ValueError):
+            pain = 3.0
+        changed = False
+        if day == 1 and marks.get("start_day") != today:
+            try:
+                emitter("period_start", {"severity": pain})
+            except Exception as exc:
+                logger.debug("[amo_med] 发 period_start 失败: %s" % exc)
+            marks["start_day"] = today
+            changed = True
+        elif day == bleed + 1 and marks.get("end_day") != today:
+            try:
+                emitter("period_end", {})
+            except Exception as exc:
+                logger.debug("[amo_med] 发 period_end 失败: %s" % exc)
+            marks["end_day"] = today
+            changed = True
+        if changed:
+            self._state["period_events"] = marks
+            self._save()
+            logger.info("[amo_med] 已向终端发事件：生理期（第 %d 天，痛经 %.0f 级）", day, pain)
 
     def _auto_roll(self) -> dict[str, Any]:
         """一天最多掷一次「今天会不会不舒服」。"""
