@@ -50,7 +50,7 @@ async function load() {
   if (h.sick && q.ok) {
     $("quoteCard").hidden = false;
     // 按钮是「手动催一下」：平时是她自己决定去不去，按钮只用来现在就去
-    $("autoHint").textContent = "她不会自己去看病；你说「走我带你去医院」才去。";
+    $("autoHint").textContent = "她自己会去看病（钱不够会先扛着）；你催她、带她去并兜底时，才走手动就医。";
     $("total").textContent = money(q.total);
     $("reimbursed").textContent = money(q.reimbursed);
     $("selfpay").textContent = money(q.self_pay);
