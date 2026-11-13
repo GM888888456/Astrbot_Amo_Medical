@@ -37,7 +37,6 @@ except Exception:  # pragma: no cover
 
 try:
     from .catalog import (
-        ILLNESSES,
         HealthState,
         get_illness,
         insurance_split,
@@ -46,7 +45,6 @@ try:
     )
 except Exception:  # pragma: no cover
     from catalog import (  # type: ignore
-        ILLNESSES,
         HealthState,
         get_illness,
         insurance_split,
@@ -69,7 +67,7 @@ except Exception:  # pragma: no cover
                          treatment_plan)
 
 PLUGIN_NAME = "Astrbot_Amo_Medical"
-PLUGIN_VERSION = "1.4.7"
+PLUGIN_VERSION = "1.4.8"
 DISPLAY_NAME = "我想永远陪着你-医疗"
 
 try:
