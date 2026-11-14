@@ -53,9 +53,9 @@ except Exception:  # pragma: no cover
     )
 
 try:
-    from .link import probe as _link_probe, summary as _link_summary
+    from .link import probe as _link_probe
 except Exception:  # pragma: no cover
-    from link import probe as _link_probe, summary as _link_summary  # type: ignore
+    from link import probe as _link_probe  # type: ignore
 
 try:
     from .catalog import (MEDICINES, MODE_LABELS, environment_factors,
@@ -67,7 +67,7 @@ except Exception:  # pragma: no cover
                          treatment_plan)
 
 PLUGIN_NAME = "Astrbot_Amo_Medical"
-PLUGIN_VERSION = "1.5.5"
+PLUGIN_VERSION = "1.5.6"
 DISPLAY_NAME = "我想永远陪着你-医疗"
 
 try:
