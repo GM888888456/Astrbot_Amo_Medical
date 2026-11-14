@@ -67,7 +67,7 @@ except Exception:  # pragma: no cover
                          treatment_plan)
 
 PLUGIN_NAME = "Astrbot_Amo_Medical"
-PLUGIN_VERSION = "1.5.6"
+PLUGIN_VERSION = "1.5.7"
 DISPLAY_NAME = "我想永远陪着你-医疗"
 
 try:
@@ -661,18 +661,63 @@ class AmoMedicalPlugin(Star):
                     str(info.get("illness") or info.get("name") or "sick"),
                     int(self._health.since or 0),
                 )
-                try:
-                    result = await companion.charge(
-                        self_pay, reason="%s治疗" % info["name"], payee="医院",
-                        request_id=request_id, source="medical",
-                        detail=str(info.get("name") or ""),
-                    )
-                    paid = bool(result.get("ok"))
-                    reason = str(result.get("reason") or "")
-                except Exception as exc:
-                    logger.warning("[amo_med] 扣款调用失败: %s" % exc)
+                event_id = request_id
+                approved, deny_reason = True, ""
+                submit = getattr(companion, "submit_event", None)
+                if callable(submit):
+                    try:
+                        decision = submit({
+                            "event_id": event_id,
+                            "event_type": "medical_treat",
+                            "source": "medical",
+                            "scene": "private",
+                            "payload": {
+                                "cost": self_pay,
+                                "reason": "%s治疗" % info["name"],
+                                "detail": {"illness": info.get("illness"),
+                                           "name": info.get("name")},
+                            },
+                            "need_approve": True,
+                        })
+                        approved = bool(decision.get("approved")) or \
+                            str(decision.get("reason") or "") == "duplicate"
+                        deny_reason = str(decision.get("reason") or "")
+                    except Exception as exc:
+                        # 老终端/接口异常：别把看病卡死，按原流程走
+                        logger.warning("[amo_med] 提案失败，按原流程走: %s" % exc)
+                        approved = True
+                result = {}
+                if not approved:
                     paid = False
-                    reason = "扣款出错"
+                    reason = deny_reason or "终端没批"
+                    logger.info("[amo_med] 提案未通过（%s），这病先不治" % reason)
+                else:
+                    try:
+                        result = await companion.charge(
+                            self_pay, reason="%s治疗" % info["name"], payee="医院",
+                            request_id=request_id, source="medical",
+                            detail=str(info.get("name") or ""),
+                        )
+                        paid = bool(result.get("ok"))
+                        reason = str(result.get("reason") or "")
+                    except Exception as exc:
+                        logger.warning("[amo_med] 扣款调用失败: %s" % exc)
+                        paid = False
+                        result = {"code": "call_failed"}
+                        reason = "扣款出错"
+                    receipt = getattr(companion, "event_receipt", None)
+                    if callable(receipt):
+                        try:
+                            receipt({
+                                "event_id": event_id,
+                                "status": "success" if paid else "fail",
+                                "code": str(result.get("code") or ""),
+                                "reason": reason,
+                                "amount": self_pay,
+                                "balance": result.get("balance"),
+                            })
+                        except Exception as exc:
+                            logger.warning("[amo_med] 回执失败: %s" % exc)
 
         self._history.append({
             "ts": _now(), "illness": info["illness"], "name": info["name"],
